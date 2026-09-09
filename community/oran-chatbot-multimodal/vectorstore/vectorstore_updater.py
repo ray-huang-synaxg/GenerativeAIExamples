@@ -22,7 +22,7 @@ from langchain_community.document_loaders import UnstructuredFileLoader
 
 from vectorstore.custom_powerpoint_parser import process_ppt_file
 from vectorstore.custom_pdf_parser import get_pdf_documents
-from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader, Docx2txtLoader, UnstructuredHTMLLoader, TextLoader, UnstructuredPDFLoader
+from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader, Docx2txtLoader, UnstructuredHTMLLoader, TextLoader, PyMuPDFLoader
 from langchain_nvidia_ai_endpoints import ChatNVIDIA, NVIDIAEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import NeMoEmbeddings, HuggingFaceEmbeddings
@@ -83,7 +83,7 @@ def load_documents(folder, status=None):
                 # pdf_docs = get_pdf_documents(file_path)
                 # for each_page in pdf_docs:
                 #     raw_documents.extend(each_page)
-                pdf_docs = UnstructuredPDFLoader(file_path).load() #get_pdf_documents(file_path)
+                pdf_docs = PyMuPDFLoader(file_path).load()
                 raw_documents.extend(pdf_docs)
             elif file.endswith("ppt") or file.endswith("pptx"):
                 pptx_docs = process_ppt_file(file_path)
