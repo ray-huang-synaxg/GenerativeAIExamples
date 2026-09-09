@@ -153,6 +153,41 @@ def augment_query_generated(query, model="meta/llama2-70b"):
     final_ans = full_response
     return final_ans
 
+def is_on_topic(query):
+    """Returns True if the query is related to O-RAN, wireless comms, or telecom.
+    Uses a fast keyword pre-check; falls back to LLM classification for ambiguous cases."""
+    TOPIC_KEYWORDS = [
+        "oran", "o-ran", "3gpp", "lte", "5g", "nr ", "4g", "ran", "radio",
+        "antenna", "spectrum", "baseband", "fronthaul", "midhaul", "backhaul",
+        "du ", "cu ", "ru ", "nfv", "vran", "open ran", "xhaul", "beamforming",
+        "mimo", "carrier", "cell", "gnb", "enb", "bbu", "rru", "rbs",
+        "telecom", "wireless", "network slicing", "massive mimo", "phy", "mac",
+        "pdcp", "rlc", "rrc", "handover", "handoff", "interference", "bandwidth",
+        "frequency", "modulation", "protocol", "standard", "specification",
+        "3gpp", "ts ", "tr ", "wg1", "wg2", "wg4", "o1", "a1", "e2", "xapp",
+    ]
+    q_lower = query.lower()
+    if any(kw in q_lower for kw in TOPIC_KEYWORDS):
+        return True
+
+    # LLM-based classification for ambiguous inputs
+    if NIM_FLAG or OPENAI_FLAG:
+        llm = llm_client.llm
+    else:
+        return True  # Can't classify without LLM — allow through
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a topic classifier. Answer ONLY with 'yes' or 'no'. Is the following question related to O-RAN, 3GPP, wireless communications, radio access networks, or telecom standards?"),
+        ("user", "{input}")
+    ])
+    chain = prompt | llm | StrOutputParser()
+    try:
+        result = chain.invoke({"input": query}).strip().lower()
+        return result.startswith("yes")
+    except Exception:
+        return True  # On error, allow through
+
+
 def query_rewriting(query, history, model="meta/llama2-70b"):
     #Rewrite the given query using the context from LLM
     if NIM_FLAG or OPENAI_FLAG:
@@ -413,7 +448,15 @@ if len(prompt) > 0 and submitted == True:
             prompt = f"\nI have uploaded an image with the following description: {st.session_state.image_query}" + "Here is the question: " + prompt
         transformed_query = {"text": prompt}
         messages.append({"role": "user", "content": transformed_query["text"]})
-        
+
+        # Topic guard — refuse off-topic questions before hitting the retriever
+        if not is_on_topic(prompt):
+            refusal = "I'm sorry, but I can only answer questions related to **O-RAN, 3GPP, wireless communications, and telecom standards**. Your question appears to be outside my area of expertise. Please ask something related to O-RAN or wireless networking and I'll be happy to help!"
+            messages.append({"role": "assistant", "content": refusal})
+            with st.chat_message("assistant"):
+                st.markdown(refusal)
+            st.stop()
+
         with st.spinner("Obtaining references from documents..."):
             
             sources = {}
