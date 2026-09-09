@@ -2,7 +2,10 @@
 
 ## Summary
 
-Add an `OpenAILLM` backend to `llm/llm.py` and expose it through `config.yaml` so users can route all LLM calls (chat, multimodal, guardrails, query augmentation, reranking) through any OpenAI-compatible endpoint — including the official OpenAI API, Azure OpenAI, and self-hosted OpenAI-compatible servers (e.g., vLLM, LM Studio, Ollama).
+Add an `OpenAILLM` backend to `llm/llm.py` and expose it through `config.yaml` so users can route all LLM calls (chat, multimodal, guardrails, query augmentation, reranking) through any OpenAI-compatible endpoint — including the official OpenAI API, Azure OpenAI, and self-hosted OpenAI-compatible servers (e.g., vLLM, LM Studio, Ollama, **SynaXG AIHub**).
+
+> **Note — local LLM not required.**
+> As long as an OpenAI-compatible endpoint is reachable (such as `http://aihub.synaxg.com:3000`), the chatbot can answer questions without any locally deployed model. The endpoint handles inference; the app only sends HTTP requests to it.
 
 ---
 
@@ -158,6 +161,28 @@ langchain-openai>=0.1.0
 
 ## Configuration Examples
 
+### SynaXG AIHub (recommended for this deployment)
+
+`http://aihub.synaxg.com:3000` exposes an OpenAI-compatible API. Set `openai_base_url` to its `/v1` path and supply the AIHub API key:
+
+```yaml
+OPENAI: true
+openai_api_key: "<your-aihub-api-key>"
+openai_model_name: "<model-name-as-listed-on-aihub>"  # e.g. "llama-3.1-8b-instruct"
+openai_base_url: "http://aihub.synaxg.com:3000/v1"
+openai_api_version: ""          # leave empty — not Azure
+openai_temperature: 0.1
+openai_top_p: 0.5
+openai_max_tokens: 1600
+```
+
+To discover what models the AIHub endpoint offers:
+
+```bash
+curl http://aihub.synaxg.com:3000/v1/models \
+  -H "Authorization: Bearer <your-aihub-api-key>" | python3 -m json.tool
+```
+
 ### Official OpenAI API (GPT-4o)
 
 ```yaml
@@ -220,6 +245,8 @@ This is the OpenAI vision message format. Compatibility matrix:
 | `gpt-4-turbo` (with vision) | ✅ Full support |
 | `gpt-4-vision-preview` | ✅ Full support |
 | Azure GPT-4o | ✅ Full support |
+| SynaXG AIHub (vision-capable model) | ✅ If the deployed model supports vision |
+| SynaXG AIHub (text-only model) | ⚠️ Graceful fallback (no crash) |
 | vLLM with LLaVA / Phi-3-vision | ✅ With compatible model |
 | Ollama with LLaVA | ✅ With compatible model |
 | GPT-3.5-turbo / text-only models | ❌ Will raise API error |
@@ -244,6 +271,7 @@ def multimodal_invoke(self, b64_string, **kwargs):
 | Test | Expected |
 |---|---|
 | `config.yaml` with `OPENAI: true`, valid key, `gpt-4o` | Chatbot answers ORAN queries; fact check returns TRUE/FALSE |
+| SynaXG AIHub endpoint (`openai_base_url: http://aihub.synaxg.com:3000/v1`) | Queries route to AIHub; answers stream back |
 | Azure endpoint with `openai_api_version` set | `AzureChatOpenAI` used; answers return |
 | `openai_base_url` pointing to local vLLM | Queries route to local server |
 | `OPENAI: false`, `NIM: false` | Falls back to NVIDIA API Catalog (no regression) |
