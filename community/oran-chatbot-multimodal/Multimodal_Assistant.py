@@ -455,54 +455,124 @@ if len(prompt) > 0 and submitted == True:
             messages.append({"role": "assistant", "content": refusal})
             with st.chat_message("assistant"):
                 st.markdown(refusal)
-            st.stop()
+        else:
+            with st.spinner("Obtaining references from documents..."):
+                sources = {}
+                if rag_type == 0:
+                    ret_docs, context, sources = get_relevant_docs(CORE_DIR, transformed_query["text"])
+                    print("length of source docs: ", len(sources))
+                if rag_type == 1: 
+                    augmented_queries = augment_multiple_query(transformed_query["text"])
+                    queries = [transformed_query["text"]] + augmented_queries[2:]
+                    # print("Queries are = ", queries)
+                    retrieved_documents = []
+                    retrieved_metadatas = []
+                    relevant_docs = []
+                    for query in queries:
+                        ret_docs,cons,srcs = get_relevant_docs(CORE_DIR, query)
+                        for doc in ret_docs:
+                            retrieved_documents.append(doc.page_content)
+                            retrieved_metadatas.append(doc.metadata['source'])
+                            relevant_docs.append(doc)
+                    print("length of retrieved docs: ", len(retrieved_documents))
+                    #Remove all duplicated documents and retain the original metadata
+                    unique_documents = []
+                    unique_documents_metadata = []
+                    unique_relevant_documents = []
+                    for idx, (document,source) in enumerate(zip(retrieved_documents,retrieved_metadatas)):
+                            if document not in unique_documents:
+                                unique_documents.append(document)
+                                unique_documents_metadata.append(source)
+                                unique_relevant_documents.append(relevant_docs[idx])
+                
+                    if len(retrieved_documents) == 0:
+                        context = ""
+                        print("not context found context")
+                    else: 
+                        print("length of unique docs: ", len(unique_documents))
+                        #Instantiate the re-ranker model and get scores for each retrieved document
+                        new_updated_documents = []
+                        new_updated_sources = []
+                        if not config_yaml['Reranker_NIM']:
+                            print("\n\nReranking with Cross-encoder model: ", config_yaml['reranker_model'])
+                            cross_encoder = CrossEncoder(config_yaml['reranker_model']) 
+                            pairs = [[prompt, doc] for doc in unique_documents]
+                            scores = cross_encoder.predict(pairs)
+                            #Sort the scores from highest to least
+                            order_ids =  np.argsort(scores)[::-1]
+                            #Get the top 10 scores
+                            if len(order_ids)>=10:
+                                for i in range(10):
+                                    new_updated_documents.append(unique_documents[order_ids[i]])
+                                    new_updated_sources.append(unique_documents_metadata[order_ids[i]])
+                            else:
+                                for i in range(len(order_ids)):
+                                    new_updated_documents.append(unique_documents[order_ids[i]])
+                                    new_updated_sources.append(unique_documents_metadata[order_ids[i]])
+                        else:
+                            print("\n\nReranking with Retriever Text Reranking NIM model: ", config_yaml["reranker_model_name"])
+                            # Initialize and connect to the running NeMo Retriever Text Reranking NIM 
+                            reranker = NVIDIARerank(model=config_yaml["reranker_model_name"],
+                                                    base_url=config_yaml["reranker_api_endpoint_url"], top_n=10)
+                            reranked_chunks = reranker.compress_documents(query=transformed_query["text"], documents=unique_relevant_documents)
+                            for chunks in reranked_chunks:
+                                metadata = chunks.metadata
+                                page_content = chunks.page_content
+                                new_updated_documents.append(page_content)
+                                new_updated_sources.append(metadata['source'])
+                        
+                        print("Reranking of completed for ", len(new_updated_documents), " chunks")   
 
-        with st.spinner("Obtaining references from documents..."):
-            
-            sources = {}
-            if rag_type == 0:
-                ret_docs, context, sources = get_relevant_docs(CORE_DIR, transformed_query["text"])
-                print("length of source docs: ", len(sources))
-            if rag_type == 1: 
-                augmented_queries = augment_multiple_query(transformed_query["text"])
-                queries = [transformed_query["text"]] + augmented_queries[2:]
-                # print("Queries are = ", queries)
-                retrieved_documents = []
-                retrieved_metadatas = []
-                relevant_docs = []
-                for query in queries:
-                    ret_docs,cons,srcs = get_relevant_docs(CORE_DIR, query)
+                        context = ""
+                        sources = {}
+                        for doc in new_updated_documents:
+                                context += doc + "\n\n"
+                        for i, src in enumerate(new_updated_sources):
+                                # sources += src + "\n\n"
+                                if src in sources:
+                                    sources[src] = {"doc_content": sources[src]["doc_content"]+"\n\n"+new_updated_documents[i], "doc_metadata": src}   
+                                else:
+                                    sources[src] = {"doc_content": new_updated_documents[i], "doc_metadata": src}   
+                        print("Length of unique source docs: ", len(sources))
+                        #Send the top 10 results along with the query to LLM
+                
+                if rag_type == 2: 
+                    sample_response = augment_query_generated(transformed_query["text"])
+                    augmented_queries = transformed_query["text"] + " " + sample_response
+                    print("Augmented query = ", augmented_queries)
+                    #Get all the retrievals for each queries
+                    #Get all the results and metadatas associated with each result
+                    retrieved_documents = []
+                    retrieved_metadatas = []
+                    ret_docs,cons,srcs = get_relevant_docs(CORE_DIR, augmented_queries)
                     for doc in ret_docs:
                         retrieved_documents.append(doc.page_content)
                         retrieved_metadatas.append(doc.metadata['source'])
-                        relevant_docs.append(doc)
-                print("length of retrieved docs: ", len(retrieved_documents))
-                #Remove all duplicated documents and retain the original metadata
-                unique_documents = []
-                unique_documents_metadata = []
-                unique_relevant_documents = []
-                for idx, (document,source) in enumerate(zip(retrieved_documents,retrieved_metadatas)):
-                        if document not in unique_documents:
-                            unique_documents.append(document)
-                            unique_documents_metadata.append(source)
-                            unique_relevant_documents.append(relevant_docs[idx])
                 
-                if len(retrieved_documents) == 0:
-                    context = ""
-                    print("not context found context")
-                else: 
-                    print("length of unique docs: ", len(unique_documents))
-                    #Instantiate the re-ranker model and get scores for each retrieved document
-                    new_updated_documents = []
-                    new_updated_sources = []
-                    if not config_yaml['Reranker_NIM']:
-                        print("\n\nReranking with Cross-encoder model: ", config_yaml['reranker_model'])
-                        cross_encoder = CrossEncoder(config_yaml['reranker_model']) 
+                    if len(retrieved_documents) == 0:
+                        context = ""
+                        print("not context found context")
+                    else: 
+                        print("length of retrieved docs: ", len(retrieved_documents))
+                        #Remove all duplicated documents and retain the original metadata
+                        unique_documents = []
+                        unique_documents_metadata = []
+                        for document,source in zip(retrieved_documents,retrieved_metadatas):
+                                if document not in unique_documents:
+                                    unique_documents.append(document)
+                                    unique_documents_metadata.append(source)
+
+                        print("length of unique docs: ", len(unique_documents))
+                        #Instantiate the cross-encoder model and get scores for each retrieved document
+                        cross_encoder = CrossEncoder(config_yaml['reranker_model'])
                         pairs = [[prompt, doc] for doc in unique_documents]
                         scores = cross_encoder.predict(pairs)
                         #Sort the scores from highest to least
                         order_ids =  np.argsort(scores)[::-1]
-                        #Get the top 10 scores
+                        # print(order_ids)
+                        new_updated_documents = []
+                        new_updated_sources = []
+                        #Get the top 6 scores
                         if len(order_ids)>=10:
                             for i in range(10):
                                 new_updated_documents.append(unique_documents[order_ids[i]])
@@ -511,182 +581,111 @@ if len(prompt) > 0 and submitted == True:
                             for i in range(len(order_ids)):
                                 new_updated_documents.append(unique_documents[order_ids[i]])
                                 new_updated_sources.append(unique_documents_metadata[order_ids[i]])
-                    else:
-                        print("\n\nReranking with Retriever Text Reranking NIM model: ", config_yaml["reranker_model_name"])
-                        # Initialize and connect to the running NeMo Retriever Text Reranking NIM 
-                        reranker = NVIDIARerank(model=config_yaml["reranker_model_name"],
-                                                base_url=config_yaml["reranker_api_endpoint_url"], top_n=10)
-                        reranked_chunks = reranker.compress_documents(query=transformed_query["text"], documents=unique_relevant_documents)
-                        for chunks in reranked_chunks:
-                            metadata = chunks.metadata
-                            page_content = chunks.page_content
-                            new_updated_documents.append(page_content)
-                            new_updated_sources.append(metadata['source'])
                         
-                    print("Reranking of completed for ", len(new_updated_documents), " chunks")   
-
-                    context = ""
-                    sources = {}
-                    for doc in new_updated_documents:
-                            context += doc + "\n\n"
-                    for i, src in enumerate(new_updated_sources):
-                            # sources += src + "\n\n"
-                            if src in sources:
-                                sources[src] = {"doc_content": sources[src]["doc_content"]+"\n\n"+new_updated_documents[i], "doc_metadata": src}   
-                            else:
-                                sources[src] = {"doc_content": new_updated_documents[i], "doc_metadata": src}   
-                    print("Length of unique source docs: ", len(sources))
-                    #Send the top 10 results along with the query to LLM
-                
-            if rag_type == 2: 
-                sample_response = augment_query_generated(transformed_query["text"])
-                augmented_queries = transformed_query["text"] + " " + sample_response
-                print("Augmented query = ", augmented_queries)
-                #Get all the retrievals for each queries
-                #Get all the results and metadatas associated with each result
-                retrieved_documents = []
-                retrieved_metadatas = []
-                ret_docs,cons,srcs = get_relevant_docs(CORE_DIR, augmented_queries)
-                for doc in ret_docs:
-                    retrieved_documents.append(doc.page_content)
-                    retrieved_metadatas.append(doc.metadata['source'])
-                
-                if len(retrieved_documents) == 0:
-                    context = ""
-                    print("not context found context")
-                else: 
-                    print("length of retrieved docs: ", len(retrieved_documents))
-                    #Remove all duplicated documents and retain the original metadata
-                    unique_documents = []
-                    unique_documents_metadata = []
-                    for document,source in zip(retrieved_documents,retrieved_metadatas):
-                            if document not in unique_documents:
-                                unique_documents.append(document)
-                                unique_documents_metadata.append(source)
-
-                    print("length of unique docs: ", len(unique_documents))
-                    #Instantiate the cross-encoder model and get scores for each retrieved document
-                    cross_encoder = CrossEncoder(config_yaml['reranker_model'])
-                    pairs = [[prompt, doc] for doc in unique_documents]
-                    scores = cross_encoder.predict(pairs)
-                    #Sort the scores from highest to least
-                    order_ids =  np.argsort(scores)[::-1]
-                    # print(order_ids)
-                    new_updated_documents = []
-                    new_updated_sources = []
-                    #Get the top 6 scores
-                    if len(order_ids)>=10:
-                        for i in range(10):
-                            new_updated_documents.append(unique_documents[order_ids[i]])
-                            new_updated_sources.append(unique_documents_metadata[order_ids[i]])
-                    else:
-                        for i in range(len(order_ids)):
-                            new_updated_documents.append(unique_documents[order_ids[i]])
-                            new_updated_sources.append(unique_documents_metadata[order_ids[i]])
-                        
-                    print(new_updated_sources)
-                    print(len(new_updated_documents))
-                    context = ""
-                    # sources = ""
-                    sources = {}
-                    for doc in new_updated_documents:
-                            context += doc + "\n\n"
-                    for i, src in enumerate(new_updated_sources):
-                            # sources += src + "\n\n"
-                            if src in sources:
-                                sources[src] = {"doc_content": sources[src]["doc_content"]+"\n\n"+new_updated_documents[i], "doc_metadata": src}   
-                            else:
-                                sources[src] = {"doc_content": new_updated_documents[i], "doc_metadata": src}   
-                    print("length of source docs: ", len(sources))
-                    #Send the top 10 results along with the query to LLM
+                        print(new_updated_sources)
+                        print(len(new_updated_documents))
+                        context = ""
+                        # sources = ""
+                        sources = {}
+                        for doc in new_updated_documents:
+                                context += doc + "\n\n"
+                        for i, src in enumerate(new_updated_sources):
+                                # sources += src + "\n\n"
+                                if src in sources:
+                                    sources[src] = {"doc_content": sources[src]["doc_content"]+"\n\n"+new_updated_documents[i], "doc_metadata": src}   
+                                else:
+                                    sources[src] = {"doc_content": new_updated_documents[i], "doc_metadata": src}   
+                        print("length of source docs: ", len(sources))
+                        #Send the top 10 results along with the query to LLM
             
-            if rag_type == 3: 
-                ret_docs,context,sources = get_relevant_docs_mq(CORE_DIR, prompt)
+                if rag_type == 3: 
+                    ret_docs,context,sources = get_relevant_docs_mq(CORE_DIR, prompt)
             
-                #Get all the retrievals for each queries
-                #Get all the results and metadatas associated with each result
-                retrieved_documents = []
-                retrieved_metadatas = []
-                for doc in ret_docs:
-                    retrieved_documents.append(doc.page_content)
-                    retrieved_metadatas.append(doc.metadata['source'])
-                if len(retrieved_documents) == 0:
-                    context = ""
-                else:
-                    print("length of retrieved docs: ", len(retrieved_documents))
-                    #Remove all duplicated documents and retain the original metadata
-                    unique_documents = []
-                    unique_documents_metadata = []
-                    for document,source in zip(retrieved_documents,retrieved_metadatas):
-                            if document not in unique_documents:
-                                unique_documents.append(document)
-                                unique_documents_metadata.append(source)
-
-                    print("length of unique docs: ", len(unique_documents))
-                    #Instantiate the cross-encoder model and get scores for each retrieved document
-                    cross_encoder = CrossEncoder(config_yaml['reranker_model']) 
-                    pairs = [[prompt, doc] for doc in unique_documents]
-                    scores = cross_encoder.predict(pairs)
-                    #Sort the scores from highest to least
-                    order_ids =  np.argsort(scores)[::-1]
-                    # print(order_ids)
-                    new_updated_documents = []
-                    new_updated_sources = []
-                    #Get the top 6 scores
-                    if len(order_ids)>=10:
-                        for i in range(10):
-                            new_updated_documents.append(unique_documents[order_ids[i]])
-                            new_updated_sources.append(unique_documents_metadata[order_ids[i]])
+                    #Get all the retrievals for each queries
+                    #Get all the results and metadatas associated with each result
+                    retrieved_documents = []
+                    retrieved_metadatas = []
+                    for doc in ret_docs:
+                        retrieved_documents.append(doc.page_content)
+                        retrieved_metadatas.append(doc.metadata['source'])
+                    if len(retrieved_documents) == 0:
+                        context = ""
                     else:
-                        for i in range(len(order_ids)):
-                            new_updated_documents.append(unique_documents[order_ids[i]])
-                            new_updated_sources.append(unique_documents_metadata[order_ids[i]])
-                        
-                    print((new_updated_sources))
-                    print(len(new_updated_documents))
-                    context = ""
-                    # sources = ""
-                    sources = {}
-                    for doc in new_updated_documents:
-                            context += doc + "\n\n"
-                    for i, src in enumerate(new_updated_sources):
-                            # sources += src + "\n\n"
-                            if src in sources:
-                                sources[src] = {"doc_content": sources[src]["doc_content"]+"\n\n"+new_updated_documents[i], "doc_metadata": src}   
-                            else:
-                                sources[src] = {"doc_content": new_updated_documents[i], "doc_metadata": src}   
-                    print("length of source docs: ", len(sources))
-                    #Send the top 10 results along with the query to LLM
-                
-            st.session_state.sources = sources
-            augmented_prompt = "Relevant documents:" + context + "\n\n[[QUESTION]]\n\n" + transformed_query["text"] #+ "\n" + config["footer"]
-            system_prompt = config["header"]
-        # Display assistant response in chat message container
-        with st.chat_message("assistant"):
-            response = llm_client.chat_with_prompt(system_prompt, augmented_prompt)
-            print(response)
-            message_placeholder = st.empty()
-            full_response = ""
-            for chunk in response:
-                full_response += chunk
-                message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
+                        print("length of retrieved docs: ", len(retrieved_documents))
+                        #Remove all duplicated documents and retain the original metadata
+                        unique_documents = []
+                        unique_documents_metadata = []
+                        for document,source in zip(retrieved_documents,retrieved_metadatas):
+                                if document not in unique_documents:
+                                    unique_documents.append(document)
+                                    unique_documents_metadata.append(source)
 
-        add_history_to_memory(memory, transformed_query["text"], full_response)
-        with st.spinner("Running fact checking/guardrails..."):
-            full_response += "\n\nFact Check result: " 
-            res = fact_check(context, transformed_query["text"], full_response)
-            for response in res:
-                full_response += response
-                message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
-        
-        with st.chat_message("assistant"):
-            messages.append(
-                    {"role": "assistant", "content": full_response}
-            )
-            st.write(full_response)
-            st.rerun()
+                        print("length of unique docs: ", len(unique_documents))
+                        #Instantiate the cross-encoder model and get scores for each retrieved document
+                        cross_encoder = CrossEncoder(config_yaml['reranker_model']) 
+                        pairs = [[prompt, doc] for doc in unique_documents]
+                        scores = cross_encoder.predict(pairs)
+                        #Sort the scores from highest to least
+                        order_ids =  np.argsort(scores)[::-1]
+                        # print(order_ids)
+                        new_updated_documents = []
+                        new_updated_sources = []
+                        #Get the top 6 scores
+                        if len(order_ids)>=10:
+                            for i in range(10):
+                                new_updated_documents.append(unique_documents[order_ids[i]])
+                                new_updated_sources.append(unique_documents_metadata[order_ids[i]])
+                        else:
+                            for i in range(len(order_ids)):
+                                new_updated_documents.append(unique_documents[order_ids[i]])
+                                new_updated_sources.append(unique_documents_metadata[order_ids[i]])
+                        
+                        print((new_updated_sources))
+                        print(len(new_updated_documents))
+                        context = ""
+                        # sources = ""
+                        sources = {}
+                        for doc in new_updated_documents:
+                                context += doc + "\n\n"
+                        for i, src in enumerate(new_updated_sources):
+                                # sources += src + "\n\n"
+                                if src in sources:
+                                    sources[src] = {"doc_content": sources[src]["doc_content"]+"\n\n"+new_updated_documents[i], "doc_metadata": src}   
+                                else:
+                                    sources[src] = {"doc_content": new_updated_documents[i], "doc_metadata": src}   
+                        print("length of source docs: ", len(sources))
+                        #Send the top 10 results along with the query to LLM
+                
+                st.session_state.sources = sources
+                augmented_prompt = "Relevant documents:" + context + "\n\n[[QUESTION]]\n\n" + transformed_query["text"] #+ "\n" + config["footer"]
+                system_prompt = config["header"]
+
+            # Display assistant response in chat message container
+            with st.chat_message("assistant"):
+                response = llm_client.chat_with_prompt(system_prompt, augmented_prompt)
+                print(response)
+                message_placeholder = st.empty()
+                full_response = ""
+                for chunk in response:
+                    full_response += chunk
+                    message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
+
+            add_history_to_memory(memory, transformed_query["text"], full_response)
+            with st.spinner("Running fact checking/guardrails..."):
+                full_response += "\n\nFact Check result: " 
+                res = fact_check(context, transformed_query["text"], full_response)
+                for response in res:
+                    full_response += response
+                    message_placeholder.markdown(full_response + "▌")
+                message_placeholder.markdown(full_response)
+            
+            with st.chat_message("assistant"):
+                messages.append(
+                        {"role": "assistant", "content": full_response}
+                )
+                st.write(full_response)
+                st.rerun()
 elif len(messages) > 1:
     summary_placeholder = st.empty()
     summary_button = summary_placeholder.button("Click to see summary")
