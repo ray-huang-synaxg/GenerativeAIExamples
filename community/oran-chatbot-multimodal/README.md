@@ -144,13 +144,16 @@ High-level data flow:
 
 ```mermaid
 graph LR
-E(User Query) --> A(FRONTEND<br/>Chat UI<br/>Streamlit)
-F(O-RAN pdf, ppt,<br/>doc/html) --> G(Image/Table<br>Extraction)
-G --> H(Multimodal<br>Embeddings)
-B --> D(Streaming<br/>Chat Output)
-C(Vector DB) -- Augmented<br/> Prompt--> B((BACKEND<br/>NVIDIA AI Playground<br/>Mixtral 8x7B))
-A --Retrieval--> C
-H --> C
+  E(User Query) --> A(FRONTEND\nChat UI\nStreamlit)
+  F(O-RAN pdf, ppt,\ndoc/html) --> G(Image/Table\nExtraction)
+  G --> H(Multimodal\nEmbeddings)
+  H --> C[(Vector DB)]
+  A -- Retrieval --> C
+  C -- Context --> B((BACKEND\nNVIDIA AI Playground\nMixtral 8x7B))
+  A -- Query --> B
+  B -- Raw Response --> GR(Guardrails\nFact-Check)
+  GR -- Verified Answer --> A
+  A -- Streaming\nChat Output --> D(Web UI)
 ```
 
 ### Component Reference
