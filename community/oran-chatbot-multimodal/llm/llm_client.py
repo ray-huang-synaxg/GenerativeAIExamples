@@ -16,10 +16,15 @@
 from llm.llm import create_llm
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
+import yaml
 
 class LLMClient:
     def __init__(self, model_name="mixtral_8x7b", model_type="NVIDIA"):
+        cfg = yaml.safe_load(open("config.yaml"))
+        if cfg.get("OPENAI"):
+            model_type = "OPENAI"
+            model_name = cfg.get("openai_model_name", model_name)
         self.llm = create_llm(model_name, model_type)
 
     def chat_with_prompt(self, system_prompt, prompt):
@@ -32,7 +37,11 @@ class LLMClient:
     def multimodal_invoke(self, b64_string, steer=False, creativity=0, quality=9, complexity=0, verbosity=8):
         message = HumanMessage(content=[{"type": "text", "text": "Describe this image in detail:"},
                                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_string}"},}])
-        if steer:
-            return self.llm.invoke([message], labels={"creativity": creativity, "quality": quality, "complexity": complexity, "verbosity": verbosity})
-        else:
-            return self.llm.invoke([message])
+        try:
+            if steer:
+                return self.llm.invoke([message], labels={"creativity": creativity, "quality": quality, "complexity": complexity, "verbosity": verbosity})
+            else:
+                return self.llm.invoke([message])
+        except Exception as e:
+            print(f"[multimodal_invoke] Vision call failed ({e}). Returning empty.")
+            return AIMessage(content="")

@@ -37,19 +37,25 @@ from PIL import Image
 import yaml
 from langchain_community.vectorstores import FAISS
 
-llm_2 = ChatNVIDIA(model="meta/llama3-70b-instruct")
+_cfg = yaml.safe_load(open('config.yaml', 'r'))
+if _cfg.get('OPENAI'):
+    from llm.llm import OpenAILLM
+    llm_2 = OpenAILLM(_cfg.get('openai_model_name', 'gpt-4o-mini')).llm
+else:
+    llm_2 = ChatNVIDIA(model="meta/llama3-70b-instruct")
 
-if yaml.safe_load(open('config.yaml', 'r'))['NREM']:
+if _cfg.get('NREM'):
     # Embeddings with NeMo Retriever Embeddings Microservice (NREM)
     print("Generating embeddings with NREM")
-    nv_embedder = NVIDIAEmbeddings(base_url= yaml.safe_load(open('config.yaml', 'r'))['nrem_api_endpoint_url'],
-                                   model=yaml.safe_load(open('config.yaml', 'r'))['nrem_model_name'],
-                                   truncate = yaml.safe_load(open('config.yaml', 'r'))['nrem_truncate']
-                                   )
-
+    nv_embedder = NVIDIAEmbeddings(base_url=_cfg['nrem_api_endpoint_url'],
+                                   model=_cfg['nrem_model_name'],
+                                   truncate=_cfg['nrem_truncate'])
+elif _cfg.get('local_embedding_model'):
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    nv_embedder = HuggingFaceEmbeddings(model_name=_cfg['local_embedding_model'])
 else:
     # Embeddings with NVIDIA AI Foundation Endpoints
-    nv_embedder = NVIDIAEmbeddings(model=yaml.safe_load(open('config.yaml', 'r'))['embedding_model'])
+    nv_embedder = NVIDIAEmbeddings(model=_cfg['embedding_model'])
 
 prompt_template = ChatPromptTemplate.from_messages(
     [("system", "You are a helpful and friendly intelligent AI assistant bot named ORAN Chatbot, deployed by the Artificial Intelligence Solutions Architecture and Engineering team at NVIDIA. The context given below will provide some documentation as well as ORAN specifications. Based on this context, answer the following question related to ORAN standards and specifications. If the question is not related to this, please refrain from answering."), ("user", "{input}")]

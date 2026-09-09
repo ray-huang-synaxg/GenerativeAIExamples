@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import os
+import shutil
 
 import streamlit as st
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -21,7 +22,7 @@ from langchain_community.document_loaders import UnstructuredFileLoader
 
 from vectorstore.custom_powerpoint_parser import process_ppt_file
 from vectorstore.custom_pdf_parser import get_pdf_documents
-from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader, Docx2txtLoader, UnstructuredHTMLLoader, TextLoader, UnstructuredPDFLoader
+from langchain_community.document_loaders import DirectoryLoader, UnstructuredFileLoader, Docx2txtLoader, UnstructuredHTMLLoader, TextLoader, PyMuPDFLoader
 from langchain_nvidia_ai_endpoints import ChatNVIDIA, NVIDIAEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import NeMoEmbeddings, HuggingFaceEmbeddings
@@ -51,17 +52,20 @@ os.environ['NVIDIA_API_KEY'] = NVIDIA_API_KEY
 #     encode_kwargs=encode_kwargs,
 # )
 nv_embedder = None
-if yaml.safe_load(open('config.yaml', 'r'))['NREM']:
+_cfg = yaml.safe_load(open('config.yaml', 'r'))
+if _cfg.get('NREM'):
     # Embeddings with NeMo Retriever Embeddings Microservice (NREM)
     print("Generating embeddings with NeMo Retriever Text Embedding NIM")
-    nv_embedder = NVIDIAEmbeddings(base_url= yaml.safe_load(open('config.yaml', 'r'))['nrem_api_endpoint_url'],
-                                   model=yaml.safe_load(open('config.yaml', 'r'))['nrem_model_name'],
-                                   truncate = yaml.safe_load(open('config.yaml', 'r'))['nrem_truncate']
-                                   )
-
+    nv_embedder = NVIDIAEmbeddings(base_url=_cfg['nrem_api_endpoint_url'],
+                                   model=_cfg['nrem_model_name'],
+                                   truncate=_cfg['nrem_truncate'])
+elif _cfg.get('local_embedding_model'):
+    # Local HuggingFace embeddings — no API key required
+    print("Generating embeddings with local HuggingFace model:", _cfg['local_embedding_model'])
+    nv_embedder = HuggingFaceEmbeddings(model_name=_cfg['local_embedding_model'])
 else:
     # Embeddings with NVIDIA AI Foundation Endpoints
-    nv_embedder = NVIDIAEmbeddings(model=yaml.safe_load(open('config.yaml', 'r'))['embedding_model'], truncate="END")
+    nv_embedder = NVIDIAEmbeddings(model=_cfg['embedding_model'], truncate="END")
 
 def load_documents(folder, status=None):
     """Load documents from the specified folder."""
@@ -79,7 +83,7 @@ def load_documents(folder, status=None):
                 # pdf_docs = get_pdf_documents(file_path)
                 # for each_page in pdf_docs:
                 #     raw_documents.extend(each_page)
-                pdf_docs = UnstructuredPDFLoader(file_path).load() #get_pdf_documents(file_path)
+                pdf_docs = PyMuPDFLoader(file_path).load()
                 raw_documents.extend(pdf_docs)
             elif file.endswith("ppt") or file.endswith("pptx"):
                 pptx_docs = process_ppt_file(file_path)
@@ -192,33 +196,43 @@ def update_vectorstore(folder, config_name, status=None):
 
     documents = split_text(raw_documents)
 
-    #remove short chuncks
+    # Remove short chunks
     filtered_documents = [item for item in documents if len(item.page_content) >= 200]
-    [(len(item.page_content),item.page_content) for item in documents]
     documents = filtered_documents
-    pd.DataFrame([doc.metadata for doc in documents])['source'].unique()
-    #remove line break
-    for i in range(0,len(documents)-1):
-        documents[i].page_content=remove_line_break(documents[i].page_content)
-    #remove two points
-    for i in range(0,len(documents)-1):
-        documents[i].page_content=remove_two_points(documents[i].page_content)
-    #remove non english characters points
-    for i in range(0,len(documents)-1):
-        documents[i].page_content=remove_two_slashes(documents[i].page_content)
-    #remove two points
-    for i in range(0,len(documents)-1):
-        documents[i].page_content=remove_two_points(documents[i].page_content)
-    [(len(item.page_content),item.page_content) for item in documents]
+
+    if not documents:
+        if status:
+            status.update(label="No new documents found in new_files/. Nothing to add.", state="complete")
+        return 0
+
+    # Log unique sources being added (safe: fall back to index if 'source' key missing)
+    sources = list({doc.metadata.get('source', f'doc_{i}') for i, doc in enumerate(documents)})
+    print(f"Re-training with {len(documents)} chunks from: {sources}")
+
+    # Clean text
+    for i in range(len(documents)):
+        documents[i].page_content = remove_line_break(documents[i].page_content)
+        documents[i].page_content = remove_two_points(documents[i].page_content)
+        documents[i].page_content = remove_two_slashes(documents[i].page_content)
+        documents[i].page_content = remove_two_points(documents[i].page_content)
 
     print("Loading data to the vector index store...")
-    # status("[Step 3/4] Inserting documents into the vector store...", state="complete", expanded=False)
     db1 = FAISS.from_documents(documents, nv_embedder)
     vectorstore.merge_from(db1)
-    # with open(os.path.join(prev_folder, "vectorstore_nv.pkl"), "wb") as f:
-    #     pickle.dump(vectorstore, f)
-    # vectorstore.save_local("vectorstore_nv")
-    vectorstore.save_local(os.path.join(folder, "vectorstore_nv"))
+    # Save back to the main vectorstore folder (not new_files/)
+    vectorstore.save_local(os.path.join(prev_folder, "vectorstore_nv"))
+
+    # Move processed files from new_files/ to parent so Re-train won't duplicate them
+    for fname in os.listdir(folder):
+        src = os.path.join(folder, fname)
+        dst = os.path.join(prev_folder, fname)
+        if os.path.isfile(src):
+            # Avoid overwriting if a file with the same name already exists in parent
+            if os.path.exists(dst):
+                base, ext = os.path.splitext(fname)
+                dst = os.path.join(prev_folder, f"{base}_retrained{ext}")
+            shutil.move(src, dst)
+    print(f"Moved {len(sources)} source file(s) from new_files/ to main folder.")
     return 0
 
 # Function to process documents in chunks of 20
@@ -239,7 +253,7 @@ def process_documents_nvolve(documents):
 
         # Processing each document in the chunk
         for j, doc in enumerate(doc_chunk):
-            st.write(f"Processing: {doc.metadata['source']}")
+            st.write(f"Processing: {doc.metadata.get('source', f'doc_{i+j}')}")
 
             # Prepare data for batch insertion
             insert_data = {
@@ -269,22 +283,18 @@ def create_vectorstore(folder, config_name, status=None):
 
         #remove short chuncks
         filtered_documents = [item for item in documents if len(item.page_content) >= 200]
-        [(len(item.page_content),item.page_content) for item in documents]
         documents = filtered_documents
-        pd.DataFrame([doc.metadata for doc in documents])['source'].unique()
-        #remove line break
-        for i in range(0,len(documents)-1):
-            documents[i].page_content=remove_line_break(documents[i].page_content)
-        #remove two points
-        for i in range(0,len(documents)-1):
-            documents[i].page_content=remove_two_points(documents[i].page_content)
-        #remove non english characters points
-        for i in range(0,len(documents)-1):
-            documents[i].page_content=remove_two_slashes(documents[i].page_content)
-        #remove two points
-        for i in range(0,len(documents)-1):
-            documents[i].page_content=remove_two_points(documents[i].page_content)
-        [(len(item.page_content),item.page_content) for item in documents]
+
+        # Log sources (safe: use index fallback if 'source' key missing)
+        sources = list({doc.metadata.get('source', f'doc_{i}') for i, doc in enumerate(documents)})
+        print(f"Creating DB with {len(documents)} chunks from: {sources}")
+
+        # Clean text
+        for i in range(len(documents)):
+            documents[i].page_content = remove_line_break(documents[i].page_content)
+            documents[i].page_content = remove_two_points(documents[i].page_content)
+            documents[i].page_content = remove_two_slashes(documents[i].page_content)
+            documents[i].page_content = remove_two_points(documents[i].page_content)
 
         print("Loading data to the vector index store...")
         # status("[Step 3/4] Inserting documents into the vector store...", state="complete", expanded=False)

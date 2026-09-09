@@ -54,22 +54,28 @@ def get_relevant_docs(DOCS_DIR, text, limit=None):
         # with open(os.path.join(DOCS_DIR, "vectorstore_nv.pkl"), "rb") as f:
         #     vectorstore = pickle.load(f)
 
-    if yaml.safe_load(open('config.yaml', 'r'))['NREM']:
+    _cfg = yaml.safe_load(open('config.yaml', 'r'))
+    if _cfg.get('NREM'):
         # Embeddings with NeMo Retriever Embeddings Microservice (NREM)
         print("Generating embeddings with NREM")
-        nv_embedder = NVIDIAEmbeddings(base_url= yaml.safe_load(open('config.yaml', 'r'))['nrem_api_endpoint_url'],
-                                       model=yaml.safe_load(open('config.yaml', 'r'))['nrem_model_name'],
-                                       truncate = yaml.safe_load(open('config.yaml', 'r'))['nrem_truncate']
-                                       )
-
+        nv_embedder = NVIDIAEmbeddings(base_url=_cfg['nrem_api_endpoint_url'],
+                                       model=_cfg['nrem_model_name'],
+                                       truncate=_cfg['nrem_truncate'])
+    elif _cfg.get('local_embedding_model'):
+        # Local HuggingFace embeddings — no API key required
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        print("Generating embeddings with local HuggingFace model:", _cfg['local_embedding_model'])
+        nv_embedder = HuggingFaceEmbeddings(model_name=_cfg['local_embedding_model'])
     else:
         # Embeddings with NVIDIA AI Foundation Endpoints
-        nv_embedder = NVIDIAEmbeddings(model=yaml.safe_load(open('config.yaml', 'r'))['embedding_model'])
+        nv_embedder = NVIDIAEmbeddings(model=_cfg['embedding_model'])
 
     vectorstore = FAISS.load_local(os.path.join(DOCS_DIR, "vectorstore_nv"), nv_embedder, allow_dangerous_deserialization=True)
-    retriever = vectorstore.as_retriever(search_type="similarity_score_threshold",
-                             search_kwargs={"score_threshold": .3,
-                                            "k": 10}) #search_type="similarity_score_threshold",
+    # Use plain similarity (top-k) instead of score threshold.
+    # HuggingFace/FAISS L2 scores don't map cleanly to [0,1] so a 0.3 threshold
+    # silently drops all results. Return the top-10 most similar chunks always.
+    retriever = vectorstore.as_retriever(search_type="similarity",
+                             search_kwargs={"k": 10})
     print(retriever)
     concatdocs = ""
     sources = {}
@@ -128,7 +134,7 @@ def get_relevant_docs_mq(DOCS_DIR, text):
     llm = ChatNVIDIA(model="playground_llama2_70b")
     llm_chain = LLMChain(llm=llm, prompt=QUERY_PROMPT, output_parser=output_parser)
     retriever_mq = MultiQueryRetriever(
-    retriever=vectorstore.as_retriever(search_type="similarity_score_threshold",search_kwargs={"k": 10, "score_threshold": 0.3}), llm_chain=llm_chain, parser_key="lines")
+    retriever=vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10}), llm_chain=llm_chain, parser_key="lines")
     #retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
     concatdocs = ""

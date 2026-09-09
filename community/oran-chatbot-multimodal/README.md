@@ -64,8 +64,9 @@ Save your service account credentials file as `service.json` inside the `oran-ch
    To access NeMo services and language model, we will add the NVIDIA API key to the `config.yaml` file under the placeholder called `nvidia_api_key`. Note that the NVIDIA API key should be of form `nvapi-b**************`
 
 
-### Step 7. (Optional) Enable NVIDIA NIM for LLMs and NeMo Retriever Text Embedding NIM
+### Step 7. (Optional) Enable NVIDIA NIM, NREM, or OpenAI-compatible LLM endpoint
 
+**NVIDIA NIM / NREM (self-hosted):**
 NVIDIA NIM for LLMs and NeMo Retriever Text Embeddings Microservice can be enabled in `config.yaml` if you wish to use these microservices instead of NVIDIA AI Foundation Endpoints.
 
 To use self-hosted NIM, set `NIM: true` in `config.yaml` - then set `nim_model_name`, `nim_base_url`, and other parameters appropriately.
@@ -73,6 +74,24 @@ To use self-hosted NIM, set `NIM: true` in `config.yaml` - then set `nim_model_n
 To use self-hosted NREM: set `NREM: true` in `config.yaml` - then set `nrem_model_name` and `nrem_api_endpoint_url` appropriately.
 
 For more information on how to setup NIM, please see the documentation [here](https://docs.nvidia.com/nim/large-language-models/latest/getting-started.html).
+
+**OpenAI-compatible endpoint (highest priority):**
+Set `OPENAI: true` to use any OpenAI-compatible LLM service — including OpenAI, Azure OpenAI, vLLM, Ollama, or a private gateway such as [SynaXG AIHub](https://aihub.synaxg.com):
+
+```yaml
+OPENAI: true
+openai_api_key: "your-key-here"
+openai_model_name: "gpt-4o-mini"          # or model name from your gateway
+openai_base_url: "https://your-endpoint/v1"   # leave empty for OpenAI
+```
+
+Discover available model names from your gateway:
+```bash
+curl https://your-endpoint/v1/models -H "Authorization: Bearer <your-key>"
+```
+
+**Local embeddings (no API key required):**
+Set `local_embedding_model: "sentence-transformers/all-MiniLM-L6-v2"` (already enabled by default) to use a local HuggingFace model for embeddings when neither NREM nor NVIDIA API embeddings are available. Set it to `""` to fall back to the NVIDIA API embedding endpoint.
 
 ### Step 8. Run the chatbot using streamlit
    Go to the `oran_chatbot` folder to run the O-RAN RAG chatbot using streamlit.
@@ -123,19 +142,117 @@ For more information on how to setup NIM, please see the documentation [here](ht
    Once our chatbot is running, we can use the evaluation scripts to test its performance.
    The `Run synthetic data generation` button in `Evaluation Metrics` tab generates a test dataset using the files in knowledge base. Once the synthetic test set is generated, click on the `Generate evaluation metrics` button to see a comprehensive evaluation report for the RAG performance.
 
-## Architecture Diagram
+## Architecture
 
-Here is how the system is designed:
+### System Overview
+
+```
+User Query (Streamlit UI)
+       │
+       ▼
+┌──────────────────────────────────────────────────────┐
+│               Multimodal_Assistant.py                │
+│  (Main Streamlit app — orchestration layer)          │
+└───┬──────────────┬──────────────┬────────────────────┘
+    │              │              │
+    ▼              ▼              ▼
+[RAG Pipeline] [Memory]      [Guardrails]
+```
+
+#### High-level data flow:
 
 ```mermaid
 graph LR
-E(User Query) --> A(FRONTEND<br/>Chat UI<br/>Streamlit)
-F(O-RAN pdf, ppt,<br/>doc/html) --> G(Image/Table<br>Extraction)
-G --> H(Multimodal<br>Embeddings)
-B --> D(Streaming<br/>Chat Output)
-C(Vector DB) -- Augmented<br/> Prompt--> B((BACKEND<br/>NVIDIA AI Playground<br/>Mixtral 8x7B))
-A --Retrieval--> C
-H --> C
+  E(User Query) --> A(FRONTEND\nChat UI\nStreamlit)
+  F(O-RAN pdf, ppt,\ndoc/html) --> G(Image/Table\nExtraction)
+  G --> H(Multimodal\nEmbeddings)
+  H --> C[(Vector DB)]
+  A -- Retrieval --> C
+  C -- Context --> B((BACKEND\nNVIDIA AI Playground\nMixtral 8x7B))
+  A -- Query --> B
+  B -- Raw Response --> GR(Guardrails\nFact-Check)
+  GR -- Verified Answer --> A
+  A -- Streaming\nChat Output --> D(Web UI)
+```
+### RAG type options
+
+Pass `--rag_type <N>` to select the retrieval pipeline:
+
+| `--rag_type` | Pipeline |
+|---|---|
+| `0` | Basic RAG |
+| `1` | *(recommended)* Augmented query + CrossEncoder reranking |
+| `2` | HyDE + Reranker |
+| `3` | MultiQueryRetriever + Reranker |
+
+
+### End-to-End Query Flow (RAG type 1)
+
+```
+User Query
+   │
+   ├─► query_rewriting()         [if follow-up, uses ConversationSummaryMemory]
+   │
+   ├─► augment_multiple_query()  → 5 ORAN-specific sub-queries
+   │
+   ├─► get_relevant_docs()       × 6 (original + 5 augmented)  →  top-k docs
+   │
+   ├─► CrossEncoder reranking    →  top-4 docs
+   │
+   ├─► nemo_rag()                →  LLM streams answer to UI
+   │
+   ├─► add_history_to_memory()   →  update ConversationSummaryMemory
+   │
+   └─► fact_check()  [optional]  →  TRUE / FALSE verification
+```
+
+## Stopping and Restarting the Server
+
+### Find the running process
+
+```bash
+pgrep -a -f streamlit
+```
+
+### Stop
+
+```bash
+# Replace <PID> with the PID printed by pgrep above
+kill <PID>
+```
+
+### Restart (foreground — logs printed to terminal)
+
+```bash
+cd /path/to/oran-chatbot-multimodal
+source .venv/bin/activate    # or use .venv/bin/python directly
+streamlit run Multimodal_Assistant.py --server.port 8011 -- --rag_type 1
+```
+
+### Restart (background — persists after terminal close)
+
+```bash
+cd /path/to/oran-chatbot-multimodal
+nohup .venv/bin/python -m streamlit run Multimodal_Assistant.py \
+  --server.port 8011 \
+  --server.headless true \
+  --server.address 0.0.0.0 \
+  -- --rag_type 1 \
+  > /tmp/oran-chatbot.log 2>&1 &
+echo "Started PID $!"
+```
+
+Tail the log at any time:
+
+```bash
+tail -f /tmp/oran-chatbot.log
+```
+
+
+### Verify the server is healthy
+
+```bash
+curl http://localhost:8011/_stcore/health   # → ok
 ```
 
 ## Component Swapping
@@ -158,6 +275,60 @@ Depending on the backend and model, you may need to modify the way in which you 
 - Cloud Hosted: The current implementation uses the NVIDIA AI Foundation Endpoints to abstract away the details of the infrastructure through a simple API call. You can also swap this out quickly by deploying in DGX Cloud with NVIDIA GPUs and LLMs.
 - On-Prem/Locally Hosted: If you would like to run a similar model locally, it is usually necessary to have significantly powerful hardware (Llama2-70B requires over 100GB of GPU memory) and various optimization toolkits to run inference (TRT-LLM and TensorRT). Smaller models (Llama2-7B, Mistral-7B, etc) are easier to run but may have worse performance.
 
+### Configuration — `config.yaml`
+
+| Key | Default | Description |
+|---|---|---|
+| `nvidia_api_key` | — | NVIDIA API key (`nvapi-…`) |
+| `llm_model` | `mistralai/mixtral-8x7b-instruct-v0.1` | LLM for chat and guardrails |
+| `embedding_model` | `nvidia/nv-embedqa-e5-v5` | NVIDIA API embedding model |
+| `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Local CrossEncoder reranker |
+| `local_embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | Local HuggingFace embedder (used when `NREM: false`; set to `""` to fall back to NVIDIA API) |
+| `NIM` | `false` | Use self-hosted LLM NIM |
+| `nim_model_name` | `meta/llama3-8b-instruct` | NIM model name |
+| `nim_base_url` | `http://localhost:8000/v1` | NIM endpoint |
+| `NREM` | `false` | Use self-hosted embedding NIM |
+| `Reranker_NIM` | `false` | Use NVIDIARerank NIM instead of local CrossEncoder |
+| `OPENAI` | `false` | Use any OpenAI-compatible LLM endpoint (highest priority when `true`) |
+| `openai_api_key` | `sk-placeholder` | API key for the OpenAI-compatible service |
+| `openai_model_name` | `gpt-4o-mini` | Model name as returned by the service's `/v1/models` endpoint |
+| `openai_base_url` | `""` | Base URL (e.g. `https://aihub.synaxg.com/v1`); leave empty for OpenAI |
+| `openai_api_version` | `""` | Required only for Azure OpenAI; leave empty otherwise |
+
+
+
+## Directory Structure
+
+```
+oran-chatbot-multimodal/
+├── Multimodal_Assistant.py      # Main Streamlit app (orchestration)
+├── config.yaml                  # Runtime configuration
+├── requirements.txt
+├── bot_config/                  # System prompt / footer templates
+├── docs/                        # Design documentation & smoke tests
+├── evals/                       # Evaluation notebooks
+├── guardrails/
+│   └── fact_check.py            # Post-response LLM fact verification
+├── llm/
+│   ├── llm.py                   # LLM backend factory (NVIDIA / NIM / Local)
+│   └── llm_client.py            # Unified text + multimodal client
+├── pages/
+│   ├── 1_Knowledge_Base.py      # Document upload / vector DB management
+│   └── 2_Evaluation_Metrics.py  # Synthetic test set + RAG metrics
+├── retriever/
+│   ├── embedder.py              # Embedding models (NVIDIA / HuggingFace / NREM)
+│   ├── retriever.py             # Retrieval functions (basic + multi-query)
+│   └── vector.py                # Vector DB abstraction (Milvus / Qdrant)
+├── utils/
+│   ├── feedback.py              # Google Sheets feedback integration
+│   └── memory.py                # ConversationSummaryMemory helpers
+└── vectorstore/
+    ├── custom_pdf_parser.py     # Multimodal PDF parsing (text/table/image)
+    ├── custom_powerpoint_parser.py
+    ├── embedder.py              # Ingestion-time embedder
+    └── vectorstore_updater.py   # Add / delete documents from FAISS index
+```
+
 ## Pipeline Enhancement Opportunities:
 
 ### Multimodal Parsing:
@@ -171,3 +342,13 @@ Implementing robust guardrails for multimodal systems presents unique challenges
 
 ### Function-calling Agents:
 Empower the Language Model (LLM) by providing access to external APIs. This integration allows the model to augment response quality through structured interactions with existing systems and software, such as leveraging Google Search for enhanced depth and accuracy in replies.
+
+### Multi-Domain Bot Type Support:
+The current deployment uses a single default database (`vectorstore/oran/`) and a fixed bot configuration (`multimodal_oran`). A natural enhancement is to restore the bot-type selector and wire each configuration to its own vectorstore folder — for example, `vectorstore/oran/` for O-RAN specs and `vectorstore/3gpp/` for 3GPP protocol documents. This would allow:
+
+- **Separate ingestion pipelines** per domain, with different chunking strategies or parsers suited to each document type
+- **Domain-targeted retrieval** — queries routed only to the relevant corpus, reducing context noise
+- **Distinct LLM personas** per domain via different `header` system prompts in each `bot_config/*.config`
+- **Cross-domain queries** could be supported by a router agent that fans out to both vectorstores and merges results before reranking
+
+To implement: add a new config file (e.g. `bot_config/3gpp.config`) with `"core_docs_directory_name": "3gpp"`, restore the `st.selectbox` in `pages/1_Knowledge_Base.py` and `Multimodal_Assistant.py`, and upload documents into the corresponding folder via the Knowledge Base tab.
