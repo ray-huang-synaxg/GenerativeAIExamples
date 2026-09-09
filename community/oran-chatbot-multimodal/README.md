@@ -140,7 +140,7 @@ User Query (Streamlit UI)
 [RAG Pipeline] [Memory]      [Guardrails]
 ```
 
-High-level data flow:
+#### High-level data flow:
 
 ```mermaid
 graph LR
@@ -155,94 +155,17 @@ graph LR
   GR -- Verified Answer --> A
   A -- Streaming\nChat Output --> D(Web UI)
 ```
+### RAG type options
 
-### Component Reference
+Pass `--rag_type <N>` to select the retrieval pipeline:
 
-#### 1. Frontend — `Multimodal_Assistant.py`
-
-- **Streamlit** app (port 8011) with 2 subpages: `pages/1_Knowledge_Base.py`, `pages/2_Evaluation_Metrics.py`
-- Selectable RAG pipeline via `--rag_type`:
-
-| Value | Pipeline |
+| `--rag_type` | Pipeline |
 |---|---|
 | `0` | Basic RAG |
-| `1` | *(default)* Augmented Query RAG + CrossEncoder reranking |
-| `2` | HyDE (Hypothetical Document Embeddings) + Reranker |
-| `3` | LangChain MultiQueryRetriever + Reranker |
+| `1` | *(recommended)* Augmented query + CrossEncoder reranking |
+| `2` | HyDE + Reranker |
+| `3` | MultiQueryRetriever + Reranker |
 
-#### 2. Document Ingestion — `vectorstore/`
-
-```
-PDF / PPT / HTML
-      │
-      ▼
-custom_pdf_parser.py / custom_powerpoint_parser.py
-  ├─ Text blocks  (PyMuPDF, grouped by ~500 chars)
-  ├─ Tables  ──► DePlot NIM (chart linearization)
-  │                └─► Mixtral (plain-English description)
-  └─ Images  ──► NeVA-22B  (captioning + graph detection)
-                   └─► DePlot NIM (if graph detected)
-      │
-      ▼
-embedder.py → FAISS index  (vectorstore/vectorstore_nv)
-```
-
-Images and tables are described by multimodal LLMs and their descriptions embedded alongside text, enabling truly multimodal retrieval without storing raw pixel data in the vector DB.
-
-#### 3. LLM Layer — `llm/`
-
-| File | Role |
-|---|---|
-| `llm.py` | `NvidiaLLM`, `NimLLM`, `LocalLLM` — creates a `ChatNVIDIA` or `HuggingFacePipeline` |
-| `llm_client.py` | `LLMClient` — wraps `chat_with_prompt` (text) and `multimodal_invoke` (vision) |
-
-**Supported backends** (toggled in `config.yaml`):
-
-| Backend | `NIM` flag | Model |
-|---|---|---|
-| NVIDIA AI Foundation Endpoints | `false` | `mistralai/mixtral-8x7b-instruct-v0.1` (default) |
-| Self-hosted NVIDIA NIM | `true` | `meta/llama3-8b-instruct` or `llama3-70b-instruct` |
-| Local HuggingFace model | `LOCAL` type | Any HF causal LM |
-
-#### 4. Retrieval — `retriever/`
-
-| File | Role |
-|---|---|
-| `embedder.py` | `NVIDIAEmbedders` (API Catalog) or `HuggingFaceEmbedders`; NREM NIM supported |
-| `vector.py` | Abstract `VectorClient` over Milvus or Qdrant |
-| `retriever.py` | `get_relevant_docs()` (FAISS similarity) and `get_relevant_docs_mq()` (MultiQueryRetriever) |
-
-**Advanced retrieval techniques in `Multimodal_Assistant.py`**:
-
-- **Query Augmentation** — LLM generates 5 ORAN-specific sub-queries; all 6 are searched
-- **HyDE** — LLM generates a hypothetical answer; its embedding is used for retrieval
-- **Query Rewriting** — Rewrites follow-up questions to be self-contained using conversation history
-- **Cross-Encoder Reranking** — `cross-encoder/ms-marco-MiniLM-L-6-v2` (or `NVIDIARerank` NIM) reranks top-k docs to top-4
-
-#### 5. Memory — `utils/memory.py`
-
-- `ConversationSummaryMemory` (LangChain) — rolling LLM-generated summary of chat history
-- Used by `query_rewriting()` to resolve ambiguous follow-up questions
-
-#### 6. Guardrails — `guardrails/fact_check.py`
-
-- A second LLM call post-response verifies the answer against retrieved context
-- Returns **TRUE** (green) or **FALSE** (red) with an explanation and suggested follow-ups
-- Uses the same `llm_model` configured in `config.yaml`
-
-#### 7. Configuration — `config.yaml`
-
-| Key | Default | Description |
-|---|---|---|
-| `nvidia_api_key` | — | NVIDIA API key (`nvapi-…`) |
-| `llm_model` | `mistralai/mixtral-8x7b-instruct-v0.1` | LLM for chat and guardrails |
-| `embedding_model` | `nvidia/nv-embedqa-e5-v5` | Embedding model |
-| `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Local CrossEncoder reranker |
-| `NIM` | `false` | Use self-hosted LLM NIM |
-| `nim_model_name` | `meta/llama3-8b-instruct` | NIM model name |
-| `nim_base_url` | `http://localhost:8000/v1` | NIM endpoint |
-| `NREM` | `false` | Use self-hosted embedding NIM |
-| `Reranker_NIM` | `false` | Use NVIDIARerank NIM instead of local CrossEncoder |
 
 ### End-to-End Query Flow (RAG type 1)
 
@@ -262,38 +185,6 @@ User Query
    ├─► add_history_to_memory()   →  update ConversationSummaryMemory
    │
    └─► fact_check()  [optional]  →  TRUE / FALSE verification
-```
-
-### Directory Structure
-
-```
-oran-chatbot-multimodal/
-├── Multimodal_Assistant.py      # Main Streamlit app (orchestration)
-├── config.yaml                  # Runtime configuration
-├── requirements.txt
-├── bot_config/                  # System prompt / footer templates
-├── docs/                        # Design documentation & smoke tests
-├── evals/                       # Evaluation notebooks
-├── guardrails/
-│   └── fact_check.py            # Post-response LLM fact verification
-├── llm/
-│   ├── llm.py                   # LLM backend factory (NVIDIA / NIM / Local)
-│   └── llm_client.py            # Unified text + multimodal client
-├── pages/
-│   ├── 1_Knowledge_Base.py      # Document upload / vector DB management
-│   └── 2_Evaluation_Metrics.py  # Synthetic test set + RAG metrics
-├── retriever/
-│   ├── embedder.py              # Embedding models (NVIDIA / HuggingFace / NREM)
-│   ├── retriever.py             # Retrieval functions (basic + multi-query)
-│   └── vector.py                # Vector DB abstraction (Milvus / Qdrant)
-├── utils/
-│   ├── feedback.py              # Google Sheets feedback integration
-│   └── memory.py                # ConversationSummaryMemory helpers
-└── vectorstore/
-    ├── custom_pdf_parser.py     # Multimodal PDF parsing (text/table/image)
-    ├── custom_powerpoint_parser.py
-    ├── embedder.py              # Ingestion-time embedder
-    └── vectorstore_updater.py   # Add / delete documents from FAISS index
 ```
 
 ## Stopping and Restarting the Server
@@ -338,16 +229,6 @@ Tail the log at any time:
 tail -f /tmp/oran-chatbot.log
 ```
 
-### RAG type options
-
-Pass `--rag_type <N>` to select the retrieval pipeline:
-
-| `--rag_type` | Pipeline |
-|---|---|
-| `0` | Basic RAG |
-| `1` | *(recommended)* Augmented query + CrossEncoder reranking |
-| `2` | HyDE + Reranker |
-| `3` | MultiQueryRetriever + Reranker |
 
 ### Verify the server is healthy
 
@@ -375,6 +256,54 @@ Depending on the backend and model, you may need to modify the way in which you 
 - Cloud Hosted: The current implementation uses the NVIDIA AI Foundation Endpoints to abstract away the details of the infrastructure through a simple API call. You can also swap this out quickly by deploying in DGX Cloud with NVIDIA GPUs and LLMs.
 - On-Prem/Locally Hosted: If you would like to run a similar model locally, it is usually necessary to have significantly powerful hardware (Llama2-70B requires over 100GB of GPU memory) and various optimization toolkits to run inference (TRT-LLM and TensorRT). Smaller models (Llama2-7B, Mistral-7B, etc) are easier to run but may have worse performance.
 
+### Configuration — `config.yaml`
+
+| Key | Default | Description |
+|---|---|---|
+| `nvidia_api_key` | — | NVIDIA API key (`nvapi-…`) |
+| `llm_model` | `mistralai/mixtral-8x7b-instruct-v0.1` | LLM for chat and guardrails |
+| `embedding_model` | `nvidia/nv-embedqa-e5-v5` | Embedding model |
+| `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Local CrossEncoder reranker |
+| `NIM` | `false` | Use self-hosted LLM NIM |
+| `nim_model_name` | `meta/llama3-8b-instruct` | NIM model name |
+| `nim_base_url` | `http://localhost:8000/v1` | NIM endpoint |
+| `NREM` | `false` | Use self-hosted embedding NIM |
+| `Reranker_NIM` | `false` | Use NVIDIARerank NIM instead of local CrossEncoder |
+
+
+
+## Directory Structure
+
+```
+oran-chatbot-multimodal/
+├── Multimodal_Assistant.py      # Main Streamlit app (orchestration)
+├── config.yaml                  # Runtime configuration
+├── requirements.txt
+├── bot_config/                  # System prompt / footer templates
+├── docs/                        # Design documentation & smoke tests
+├── evals/                       # Evaluation notebooks
+├── guardrails/
+│   └── fact_check.py            # Post-response LLM fact verification
+├── llm/
+│   ├── llm.py                   # LLM backend factory (NVIDIA / NIM / Local)
+│   └── llm_client.py            # Unified text + multimodal client
+├── pages/
+│   ├── 1_Knowledge_Base.py      # Document upload / vector DB management
+│   └── 2_Evaluation_Metrics.py  # Synthetic test set + RAG metrics
+├── retriever/
+│   ├── embedder.py              # Embedding models (NVIDIA / HuggingFace / NREM)
+│   ├── retriever.py             # Retrieval functions (basic + multi-query)
+│   └── vector.py                # Vector DB abstraction (Milvus / Qdrant)
+├── utils/
+│   ├── feedback.py              # Google Sheets feedback integration
+│   └── memory.py                # ConversationSummaryMemory helpers
+└── vectorstore/
+    ├── custom_pdf_parser.py     # Multimodal PDF parsing (text/table/image)
+    ├── custom_powerpoint_parser.py
+    ├── embedder.py              # Ingestion-time embedder
+    └── vectorstore_updater.py   # Add / delete documents from FAISS index
+```
+
 ## Pipeline Enhancement Opportunities:
 
 ### Multimodal Parsing:
@@ -388,3 +317,13 @@ Implementing robust guardrails for multimodal systems presents unique challenges
 
 ### Function-calling Agents:
 Empower the Language Model (LLM) by providing access to external APIs. This integration allows the model to augment response quality through structured interactions with existing systems and software, such as leveraging Google Search for enhanced depth and accuracy in replies.
+
+### Multi-Domain Bot Type Support:
+The current deployment uses a single default database (`vectorstore/oran/`) and a fixed bot configuration (`multimodal_oran`). A natural enhancement is to restore the bot-type selector and wire each configuration to its own vectorstore folder — for example, `vectorstore/oran/` for O-RAN specs and `vectorstore/3gpp/` for 3GPP protocol documents. This would allow:
+
+- **Separate ingestion pipelines** per domain, with different chunking strategies or parsers suited to each document type
+- **Domain-targeted retrieval** — queries routed only to the relevant corpus, reducing context noise
+- **Distinct LLM personas** per domain via different `header` system prompts in each `bot_config/*.config`
+- **Cross-domain queries** could be supported by a router agent that fans out to both vectorstores and merges results before reranking
+
+To implement: add a new config file (e.g. `bot_config/3gpp.config`) with `"core_docs_directory_name": "3gpp"`, restore the `st.selectbox` in `pages/1_Knowledge_Base.py` and `Multimodal_Assistant.py`, and upload documents into the corresponding folder via the Knowledge Base tab.

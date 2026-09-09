@@ -34,18 +34,11 @@ if "config" not in st.session_state:
     st.session_state.config = ""
 
 with st.sidebar:
-    prev_cfg = st.session_state.config
-    try:
-        defaultidx = [["multimodal"]].index(st.session_state.config["name"].lower())
-    except:
-        defaultidx = 0
-    cfg_name = st.selectbox("Select a configuration/type of bot.", (["multimodal_oran","oran"]), index=defaultidx)
+    # Always use the default multimodal_oran configuration.
+    # To re-enable multi-database support, restore the selectbox here.
+    cfg_name = "multimodal_oran"
     st.session_state.config = get_config(os.path.join("bot_config", cfg_name+".config"))
     config = get_config(os.path.join("bot_config", cfg_name+".config"))
-    if st.session_state.config != prev_cfg:
-        st.rerun()
-
-st.sidebar.success("Select an experience above.")
 
 # # init the embedder
 # if "document_embedder" not in st.session_state:
