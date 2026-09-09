@@ -279,7 +279,7 @@ if "messages" not in st.session_state:
             ]
         
 if "sources" not in st.session_state:
-    st.session_state.sources = []
+    st.session_state.sources = {}
 
 if "image_query" not in st.session_state:
     st.session_state.image_query = ""
@@ -453,8 +453,8 @@ if len(prompt) > 0 and submitted == True:
         if not is_on_topic(prompt):
             refusal = "I'm sorry, but I can only answer questions related to **O-RAN, 3GPP, wireless communications, and telecom standards**. Your question appears to be outside my area of expertise. Please ask something related to O-RAN or wireless networking and I'll be happy to help!"
             messages.append({"role": "assistant", "content": refusal})
-            with st.chat_message("assistant"):
-                st.markdown(refusal)
+            st.session_state.sources = {}
+            st.rerun()
         else:
             with st.spinner("Obtaining references from documents..."):
                 sources = {}
