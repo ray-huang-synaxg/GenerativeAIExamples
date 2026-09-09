@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import os
+import shutil
 
 import streamlit as st
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -220,6 +221,18 @@ def update_vectorstore(folder, config_name, status=None):
     vectorstore.merge_from(db1)
     # Save back to the main vectorstore folder (not new_files/)
     vectorstore.save_local(os.path.join(prev_folder, "vectorstore_nv"))
+
+    # Move processed files from new_files/ to parent so Re-train won't duplicate them
+    for fname in os.listdir(folder):
+        src = os.path.join(folder, fname)
+        dst = os.path.join(prev_folder, fname)
+        if os.path.isfile(src):
+            # Avoid overwriting if a file with the same name already exists in parent
+            if os.path.exists(dst):
+                base, ext = os.path.splitext(fname)
+                dst = os.path.join(prev_folder, f"{base}_retrained{ext}")
+            shutil.move(src, dst)
+    print(f"Moved {len(sources)} source file(s) from new_files/ to main folder.")
     return 0
 
 # Function to process documents in chunks of 20
