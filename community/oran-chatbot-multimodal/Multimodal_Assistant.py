@@ -183,8 +183,6 @@ st.set_page_config(
         layout = "wide",
 )
 
-)
-
 # Hide the deploy button and replace with a "Settings" text label via CSS
 st.markdown("""
 <style>
