@@ -253,7 +253,7 @@ def process_documents_nvolve(documents):
 
         # Processing each document in the chunk
         for j, doc in enumerate(doc_chunk):
-            st.write(f"Processing: {doc.metadata['source']}")
+            st.write(f"Processing: {doc.metadata.get('source', f'doc_{i+j}')}")
 
             # Prepare data for batch insertion
             insert_data = {
@@ -283,22 +283,18 @@ def create_vectorstore(folder, config_name, status=None):
 
         #remove short chuncks
         filtered_documents = [item for item in documents if len(item.page_content) >= 200]
-        [(len(item.page_content),item.page_content) for item in documents]
         documents = filtered_documents
-        pd.DataFrame([doc.metadata for doc in documents])['source'].unique()
-        #remove line break
-        for i in range(0,len(documents)-1):
-            documents[i].page_content=remove_line_break(documents[i].page_content)
-        #remove two points
-        for i in range(0,len(documents)-1):
-            documents[i].page_content=remove_two_points(documents[i].page_content)
-        #remove non english characters points
-        for i in range(0,len(documents)-1):
-            documents[i].page_content=remove_two_slashes(documents[i].page_content)
-        #remove two points
-        for i in range(0,len(documents)-1):
-            documents[i].page_content=remove_two_points(documents[i].page_content)
-        [(len(item.page_content),item.page_content) for item in documents]
+
+        # Log sources (safe: use index fallback if 'source' key missing)
+        sources = list({doc.metadata.get('source', f'doc_{i}') for i, doc in enumerate(documents)})
+        print(f"Creating DB with {len(documents)} chunks from: {sources}")
+
+        # Clean text
+        for i in range(len(documents)):
+            documents[i].page_content = remove_line_break(documents[i].page_content)
+            documents[i].page_content = remove_two_points(documents[i].page_content)
+            documents[i].page_content = remove_two_slashes(documents[i].page_content)
+            documents[i].page_content = remove_two_points(documents[i].page_content)
 
         print("Loading data to the vector index store...")
         # status("[Step 3/4] Inserting documents into the vector store...", state="complete", expanded=False)
