@@ -195,33 +195,31 @@ def update_vectorstore(folder, config_name, status=None):
 
     documents = split_text(raw_documents)
 
-    #remove short chuncks
+    # Remove short chunks
     filtered_documents = [item for item in documents if len(item.page_content) >= 200]
-    [(len(item.page_content),item.page_content) for item in documents]
     documents = filtered_documents
-    pd.DataFrame([doc.metadata for doc in documents])['source'].unique()
-    #remove line break
-    for i in range(0,len(documents)-1):
-        documents[i].page_content=remove_line_break(documents[i].page_content)
-    #remove two points
-    for i in range(0,len(documents)-1):
-        documents[i].page_content=remove_two_points(documents[i].page_content)
-    #remove non english characters points
-    for i in range(0,len(documents)-1):
-        documents[i].page_content=remove_two_slashes(documents[i].page_content)
-    #remove two points
-    for i in range(0,len(documents)-1):
-        documents[i].page_content=remove_two_points(documents[i].page_content)
-    [(len(item.page_content),item.page_content) for item in documents]
+
+    if not documents:
+        if status:
+            status.update(label="No new documents found in new_files/. Nothing to add.", state="complete")
+        return 0
+
+    # Log unique sources being added (safe: fall back to index if 'source' key missing)
+    sources = list({doc.metadata.get('source', f'doc_{i}') for i, doc in enumerate(documents)})
+    print(f"Re-training with {len(documents)} chunks from: {sources}")
+
+    # Clean text
+    for i in range(len(documents)):
+        documents[i].page_content = remove_line_break(documents[i].page_content)
+        documents[i].page_content = remove_two_points(documents[i].page_content)
+        documents[i].page_content = remove_two_slashes(documents[i].page_content)
+        documents[i].page_content = remove_two_points(documents[i].page_content)
 
     print("Loading data to the vector index store...")
-    # status("[Step 3/4] Inserting documents into the vector store...", state="complete", expanded=False)
     db1 = FAISS.from_documents(documents, nv_embedder)
     vectorstore.merge_from(db1)
-    # with open(os.path.join(prev_folder, "vectorstore_nv.pkl"), "wb") as f:
-    #     pickle.dump(vectorstore, f)
-    # vectorstore.save_local("vectorstore_nv")
-    vectorstore.save_local(os.path.join(folder, "vectorstore_nv"))
+    # Save back to the main vectorstore folder (not new_files/)
+    vectorstore.save_local(os.path.join(prev_folder, "vectorstore_nv"))
     return 0
 
 # Function to process documents in chunks of 20
