@@ -71,9 +71,11 @@ def get_relevant_docs(DOCS_DIR, text, limit=None):
         nv_embedder = NVIDIAEmbeddings(model=_cfg['embedding_model'])
 
     vectorstore = FAISS.load_local(os.path.join(DOCS_DIR, "vectorstore_nv"), nv_embedder, allow_dangerous_deserialization=True)
-    retriever = vectorstore.as_retriever(search_type="similarity_score_threshold",
-                             search_kwargs={"score_threshold": .3,
-                                            "k": 10}) #search_type="similarity_score_threshold",
+    # Use plain similarity (top-k) instead of score threshold.
+    # HuggingFace/FAISS L2 scores don't map cleanly to [0,1] so a 0.3 threshold
+    # silently drops all results. Return the top-10 most similar chunks always.
+    retriever = vectorstore.as_retriever(search_type="similarity",
+                             search_kwargs={"k": 10})
     print(retriever)
     concatdocs = ""
     sources = {}
@@ -132,7 +134,7 @@ def get_relevant_docs_mq(DOCS_DIR, text):
     llm = ChatNVIDIA(model="playground_llama2_70b")
     llm_chain = LLMChain(llm=llm, prompt=QUERY_PROMPT, output_parser=output_parser)
     retriever_mq = MultiQueryRetriever(
-    retriever=vectorstore.as_retriever(search_type="similarity_score_threshold",search_kwargs={"k": 10, "score_threshold": 0.3}), llm_chain=llm_chain, parser_key="lines")
+    retriever=vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10}), llm_chain=llm_chain, parser_key="lines")
     #retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 
     concatdocs = ""
