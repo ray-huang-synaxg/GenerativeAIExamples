@@ -64,8 +64,9 @@ Save your service account credentials file as `service.json` inside the `oran-ch
    To access NeMo services and language model, we will add the NVIDIA API key to the `config.yaml` file under the placeholder called `nvidia_api_key`. Note that the NVIDIA API key should be of form `nvapi-b**************`
 
 
-### Step 7. (Optional) Enable NVIDIA NIM for LLMs and NeMo Retriever Text Embedding NIM
+### Step 7. (Optional) Enable NVIDIA NIM, NREM, or OpenAI-compatible LLM endpoint
 
+**NVIDIA NIM / NREM (self-hosted):**
 NVIDIA NIM for LLMs and NeMo Retriever Text Embeddings Microservice can be enabled in `config.yaml` if you wish to use these microservices instead of NVIDIA AI Foundation Endpoints.
 
 To use self-hosted NIM, set `NIM: true` in `config.yaml` - then set `nim_model_name`, `nim_base_url`, and other parameters appropriately.
@@ -73,6 +74,24 @@ To use self-hosted NIM, set `NIM: true` in `config.yaml` - then set `nim_model_n
 To use self-hosted NREM: set `NREM: true` in `config.yaml` - then set `nrem_model_name` and `nrem_api_endpoint_url` appropriately.
 
 For more information on how to setup NIM, please see the documentation [here](https://docs.nvidia.com/nim/large-language-models/latest/getting-started.html).
+
+**OpenAI-compatible endpoint (highest priority):**
+Set `OPENAI: true` to use any OpenAI-compatible LLM service — including OpenAI, Azure OpenAI, vLLM, Ollama, or a private gateway such as [SynaXG AIHub](https://aihub.synaxg.com):
+
+```yaml
+OPENAI: true
+openai_api_key: "your-key-here"
+openai_model_name: "gpt-4o-mini"          # or model name from your gateway
+openai_base_url: "https://your-endpoint/v1"   # leave empty for OpenAI
+```
+
+Discover available model names from your gateway:
+```bash
+curl https://your-endpoint/v1/models -H "Authorization: Bearer <your-key>"
+```
+
+**Local embeddings (no API key required):**
+Set `local_embedding_model: "sentence-transformers/all-MiniLM-L6-v2"` (already enabled by default) to use a local HuggingFace model for embeddings when neither NREM nor NVIDIA API embeddings are available. Set it to `""` to fall back to the NVIDIA API embedding endpoint.
 
 ### Step 8. Run the chatbot using streamlit
    Go to the `oran_chatbot` folder to run the O-RAN RAG chatbot using streamlit.
@@ -262,13 +281,19 @@ Depending on the backend and model, you may need to modify the way in which you 
 |---|---|---|
 | `nvidia_api_key` | — | NVIDIA API key (`nvapi-…`) |
 | `llm_model` | `mistralai/mixtral-8x7b-instruct-v0.1` | LLM for chat and guardrails |
-| `embedding_model` | `nvidia/nv-embedqa-e5-v5` | Embedding model |
+| `embedding_model` | `nvidia/nv-embedqa-e5-v5` | NVIDIA API embedding model |
 | `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Local CrossEncoder reranker |
+| `local_embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | Local HuggingFace embedder (used when `NREM: false`; set to `""` to fall back to NVIDIA API) |
 | `NIM` | `false` | Use self-hosted LLM NIM |
 | `nim_model_name` | `meta/llama3-8b-instruct` | NIM model name |
 | `nim_base_url` | `http://localhost:8000/v1` | NIM endpoint |
 | `NREM` | `false` | Use self-hosted embedding NIM |
 | `Reranker_NIM` | `false` | Use NVIDIARerank NIM instead of local CrossEncoder |
+| `OPENAI` | `false` | Use any OpenAI-compatible LLM endpoint (highest priority when `true`) |
+| `openai_api_key` | `sk-placeholder` | API key for the OpenAI-compatible service |
+| `openai_model_name` | `gpt-4o-mini` | Model name as returned by the service's `/v1/models` endpoint |
+| `openai_base_url` | `""` | Base URL (e.g. `https://aihub.synaxg.com/v1`); leave empty for OpenAI |
+| `openai_api_version` | `""` | Required only for Azure OpenAI; leave empty otherwise |
 
 
 

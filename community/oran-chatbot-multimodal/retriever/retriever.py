@@ -54,17 +54,21 @@ def get_relevant_docs(DOCS_DIR, text, limit=None):
         # with open(os.path.join(DOCS_DIR, "vectorstore_nv.pkl"), "rb") as f:
         #     vectorstore = pickle.load(f)
 
-    if yaml.safe_load(open('config.yaml', 'r'))['NREM']:
+    _cfg = yaml.safe_load(open('config.yaml', 'r'))
+    if _cfg.get('NREM'):
         # Embeddings with NeMo Retriever Embeddings Microservice (NREM)
         print("Generating embeddings with NREM")
-        nv_embedder = NVIDIAEmbeddings(base_url= yaml.safe_load(open('config.yaml', 'r'))['nrem_api_endpoint_url'],
-                                       model=yaml.safe_load(open('config.yaml', 'r'))['nrem_model_name'],
-                                       truncate = yaml.safe_load(open('config.yaml', 'r'))['nrem_truncate']
-                                       )
-
+        nv_embedder = NVIDIAEmbeddings(base_url=_cfg['nrem_api_endpoint_url'],
+                                       model=_cfg['nrem_model_name'],
+                                       truncate=_cfg['nrem_truncate'])
+    elif _cfg.get('local_embedding_model'):
+        # Local HuggingFace embeddings — no API key required
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        print("Generating embeddings with local HuggingFace model:", _cfg['local_embedding_model'])
+        nv_embedder = HuggingFaceEmbeddings(model_name=_cfg['local_embedding_model'])
     else:
         # Embeddings with NVIDIA AI Foundation Endpoints
-        nv_embedder = NVIDIAEmbeddings(model=yaml.safe_load(open('config.yaml', 'r'))['embedding_model'])
+        nv_embedder = NVIDIAEmbeddings(model=_cfg['embedding_model'])
 
     vectorstore = FAISS.load_local(os.path.join(DOCS_DIR, "vectorstore_nv"), nv_embedder, allow_dangerous_deserialization=True)
     retriever = vectorstore.as_retriever(search_type="similarity_score_threshold",

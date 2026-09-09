@@ -63,15 +63,22 @@ with open(config_yaml_path, 'r') as file:
 NVIDIA_API_KEY = config_yaml['nvidia_api_key']
 os.environ['NVIDIA_API_KEY'] = NVIDIA_API_KEY
 NIM_FLAG = False
+OPENAI_FLAG = False
 
-if config_yaml['NIM']:
+if config_yaml.get('OPENAI'):
+    OPENAI_FLAG = True
+    print("\n\nOPENAI FLAG set to True")
+elif config_yaml['NIM']:
     NIM_FLAG = True
     print("\n\nNIM FLAG set to True")
 else:
     print("\n\nNIM FLAG set to False")
 
 llm_client = None
-if NIM_FLAG==True:
+if OPENAI_FLAG:
+    llm_client = LLMClient(config_yaml.get('openai_model_name', ''), "OPENAI")
+    print("Initialized OpenAI-compatible endpoint for LLMs:", config_yaml.get('openai_base_url', 'api.openai.com'))
+elif NIM_FLAG:
     llm_client = LLMClient(config_yaml['nim_model_name'], "NIM")
     print("Initialized NVIDIA NIM for LLMs")
 else:
@@ -91,8 +98,7 @@ else:
 # A few RAG pipeline definitions 
 def nemo_rag(config, query, retrieved_documents, model="meta/llama2-70b"):
     #Combine the query and retrieved documents and send to model
-    # llm = ChatNVIDIA(model=model)
-    if NIM_FLAG==True:
+    if NIM_FLAG or OPENAI_FLAG:
         llm = llm_client.llm
     else:
         llm = ChatNVIDIA(model=model, nvidia_api_key=NVIDIA_API_KEY)
@@ -111,8 +117,8 @@ def nemo_rag(config, query, retrieved_documents, model="meta/llama2-70b"):
 
 def augment_multiple_query(query, model="meta/llama2-70b"):
     #For the given query, lets create 5 additional queries using the LLM
-    if NIM_FLAG==True:
-        print("Augmentating multiple query with NVIDIA NIM for LLMs")
+    if NIM_FLAG or OPENAI_FLAG:
+        print("Augmenting multiple query with configured LLM backend")
         llm = llm_client.llm
     else:
         print("Augmentating multiple query with NVIDIA API Catalog")
@@ -132,7 +138,7 @@ def augment_multiple_query(query, model="meta/llama2-70b"):
 
 def augment_query_generated(query, model="meta/llama2-70b"):
     #For the given query, lets create a hypothetical answer using the LLM
-    if NIM_FLAG==True:
+    if NIM_FLAG or OPENAI_FLAG:
         llm = llm_client.llm
     else:
         llm = ChatNVIDIA(model=model,max_output_token=500, top_k=1, top_p=0.0, nvidia_api_key=NVIDIA_API_KEY)
@@ -149,7 +155,7 @@ def augment_query_generated(query, model="meta/llama2-70b"):
 
 def query_rewriting(query, history, model="meta/llama2-70b"):
     #Rewrite the given query using the context from LLM
-    if NIM_FLAG==True:
+    if NIM_FLAG or OPENAI_FLAG:
         llm = llm_client.llm
     else:
         llm = ChatNVIDIA(model=model, nvidia_api_key=NVIDIA_API_KEY)
@@ -230,18 +236,14 @@ memory = st.session_state.memory
 
 with st.sidebar:
     prev_cfg = st.session_state.config
-    try:
-        defaultidx = [["multimodal"]].index(st.session_state.config["name"].lower())
-    except:
-        defaultidx = 0
-    st.header("Bot Configuration")
-    cfg_name = st.selectbox("Select a configuration/type of bot.", (["multimodal_oran", "oran"]), index=defaultidx)
+    # Always use the multimodal_oran configuration (single-database deployment).
+    # To re-enable the bot selector, replace the line below with a st.selectbox.
+    cfg_name = "multimodal_oran"
     st.session_state.config = get_config(os.path.join("bot_config", cfg_name+".config"))
     config = get_config(os.path.join("bot_config", cfg_name+".config"))
     if st.session_state.config != prev_cfg:
-        st.experimental_rerun()
+        st.rerun()
 
-    st.success("Select an experience above.")
 
     st.header("Image Input Query")
 

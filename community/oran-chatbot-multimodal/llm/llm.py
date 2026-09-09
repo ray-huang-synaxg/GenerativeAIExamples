@@ -42,6 +42,35 @@ class NimLLM:
                         max_tokens = config_yaml['max_tokens']
                         )
 
+class OpenAILLM:
+    """OpenAI-compatible endpoint (OpenAI API, Azure OpenAI, AIHub, vLLM, Ollama, etc.)"""
+    def __init__(self, model_name):
+        cfg = yaml.safe_load(open("config.yaml"))
+        api_key  = cfg.get("openai_api_key") or os.environ.get("OPENAI_API_KEY", "")
+        base_url = cfg.get("openai_base_url") or None
+        api_ver  = cfg.get("openai_api_version") or None
+
+        kwargs = dict(
+            model=model_name,
+            api_key=api_key,
+            temperature=cfg.get("openai_temperature", 0.1),
+            top_p=cfg.get("openai_top_p", 0.5),
+            max_tokens=cfg.get("openai_max_tokens", 1600),
+        )
+
+        if api_ver:
+            from langchain_openai import AzureChatOpenAI
+            self.llm = AzureChatOpenAI(
+                azure_endpoint=base_url,
+                openai_api_version=api_ver,
+                **kwargs,
+            )
+        else:
+            from langchain_openai import ChatOpenAI
+            if base_url:
+                kwargs["base_url"] = base_url
+            self.llm = ChatOpenAI(**kwargs)
+
 class LocalLLM:
     def __init__(self, model_path):
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
@@ -66,18 +95,17 @@ class LocalLLM:
 
 
 def create_llm(model_name, model_type="NVIDIA"):
-    # Use LLM to generate answer
-    if model_type == "NVIDIA":
-        model = NvidiaLLM(model_name)
+    if model_type == "OPENAI":
+        return OpenAILLM(model_name).llm
+    elif model_type == "NVIDIA":
+        return NvidiaLLM(model_name).llm
     elif model_type == "NIM":
-        model = NimLLM(model_name)
+        return NimLLM(model_name).llm
     elif model_type == "LOCAL":
-        model = LocalLLM(model_name)
+        return LocalLLM(model_name).llm
     else:
         print("Error! Need model_name and model_type!")
         exit()
-
-    return model.llm
 
 
 if __name__ == "__main__":

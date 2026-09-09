@@ -5,6 +5,27 @@ llm_model: "mistralai/mixtral-8x7b-instruct-v0.1"
 embedding_model: "nvidia/nv-embedqa-e5-v5"
 reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
+## Local HuggingFace embedding model (used when NVIDIA embedding API is unavailable)
+## Set to empty string "" to use the NVIDIA API endpoint instead
+local_embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+
+## ── OpenAI-compatible LLM endpoint ──────────────────────────────────────────
+## Set OPENAI: true to use any OpenAI-compatible endpoint instead of NVIDIA API.
+## Priority order: OPENAI > NIM > NVIDIA (default)
+##
+## SynaXG AIHub example:
+##   openai_base_url: "https://aihub.synaxg.com/v1"
+##   Run: curl https://aihub.synaxg.com/v1/models -H "Authorization: Bearer <your-key>"
+##   to list available model names.
+OPENAI: false
+openai_api_key: "sk-placeholder"
+openai_model_name: "gpt-4o-mini"
+openai_base_url: ""
+openai_api_version: ""
+openai_temperature: 0.1
+openai_top_p: 0.5
+openai_max_tokens: 1600
+
 NIM: false
 nim_model_name: "meta/llama3-8b-instruct"
 nim_base_url: "http://localhost:8000/v1"

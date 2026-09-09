@@ -19,11 +19,15 @@ from langchain_nvidia_ai_endpoints import ChatNVIDIA
 import os
 import yaml
 
-# llm = ChatNVIDIA(model="mixtral_8x7b")
 NVIDIA_API_KEY = yaml.safe_load(open("config.yaml"))['nvidia_api_key']
 os.environ['NVIDIA_API_KEY'] = NVIDIA_API_KEY
 
-llm = ChatNVIDIA(model=yaml.safe_load(open("config.yaml"))["llm_model"], max_tokens = 10000)
+def _get_llm():
+    cfg = yaml.safe_load(open("config.yaml"))
+    if cfg.get("OPENAI"):
+        from llm.llm import OpenAILLM
+        return OpenAILLM(cfg.get("openai_model_name", "gpt-4o-mini")).llm
+    return ChatNVIDIA(model=cfg["llm_model"], max_tokens=10000)
 
 def fact_check(evidence, query, response):
 
@@ -33,6 +37,7 @@ def fact_check(evidence, query, response):
 
     langchain_prompt = ChatPromptTemplate.from_messages([("system", system_message), ("user", "{input}")])
 
+    llm = _get_llm()
     chain = langchain_prompt | llm | StrOutputParser()
     response = chain.stream({"input": user_message})
     return response
