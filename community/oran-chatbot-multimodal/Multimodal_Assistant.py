@@ -183,6 +183,16 @@ st.set_page_config(
         layout = "wide",
 )
 
+# Hide the Streamlit deploy button; inject Settings UI in its place via CSS
+st.markdown("""
+<style>
+/* Hide the built-in deploy/share button */
+[data-testid="stToolbarActionButtonIcon"],
+.stDeployButton,
+[data-testid="stAppDeployButton"] { display: none !important; }
+</style>
+""", unsafe_allow_html=True)
+
 @st.cache_data()
 def load_config(cfg_arg):
     try:
@@ -269,6 +279,31 @@ with st.sidebar:
     if not uploaded_file:
         st.session_state.image_query = ""
 
+    st.divider()
+    with st.expander("⚙️ Settings", expanded=False):
+        st.caption("Appearance")
+        primary_color = st.color_picker("Primary color", value=st.session_state.get("ui_primary_color", "#76b900"))
+        bg_color = st.color_picker("Background color", value=st.session_state.get("ui_bg_color", "#0f1117"))
+        font_size = st.slider("Font size (px)", min_value=12, max_value=22, value=st.session_state.get("ui_font_size", 15))
+
+        st.session_state["ui_primary_color"] = primary_color
+        st.session_state["ui_bg_color"] = bg_color
+        st.session_state["ui_font_size"] = font_size
+
+        st.markdown(f"""
+<style>
+:root {{
+    --primary-color: {primary_color};
+    --background-color: {bg_color};
+    --font-size-base: {font_size}px;
+}}
+.stApp {{ background-color: {bg_color}; }}
+.stChatMessage, .stMarkdown p {{ font-size: {font_size}px !important; }}
+a, .stButton>button {{ color: {primary_color} !important; }}
+.stButton>button {{ border-color: {primary_color} !important; }}
+</style>
+""", unsafe_allow_html=True)
+
 # Page title
 st.header(config["page_title"])
 st.markdown(config["instructions"])
@@ -353,8 +388,7 @@ for n, msg in enumerate(messages):
 
 # Check if the topic has changed
 if st.session_state['prompt_value'] == None:
-    prompt_value = "Hi, what can you help me with?"
-    st.session_state["prompt_value"] = prompt_value
+    st.session_state["prompt_value"] = ""
 
 colx, coly = st.columns([1,20])
 
@@ -362,13 +396,12 @@ placeholder = st.empty()
 prompt = ""
 with placeholder:
     with st.form("chat-form", clear_on_submit=True):
-        instr = 'Hi there! Enter what you want to let me know here.'
+        instr = 'Hi, what can you help me with?'
         col1, col2 = st.columns([20,2])
         with col1:
-            prompt_value = st.session_state["prompt_value"]
             prompt = st.text_input(
                     instr,
-                    value=prompt_value,
+                    value="",
                     placeholder=instr,
                     label_visibility='collapsed'
                 )
