@@ -93,22 +93,26 @@ curl https://your-endpoint/v1/models -H "Authorization: Bearer <your-key>"
 **Local embeddings (no API key required):**
 Set `local_embedding_model: "sentence-transformers/all-MiniLM-L6-v2"` (already enabled by default) to use a local HuggingFace model for embeddings when neither NREM nor NVIDIA API embeddings are available. Set it to `""` to fall back to the NVIDIA API embedding endpoint.
 
-### Step 8. Run the chatbot using streamlit
-   Go to the `oran_chatbot` folder to run the O-RAN RAG chatbot using streamlit.
-   ```
-   streamlit run Multimodal_Assistant.py --server.port 8011
-   ```
-   The resulting server can be launched on the the web browser through specified port, i.e., `localhost:8011`. If your machine has ports being forwarded on the public IP, it can be accessed by other people who can use `<IP_ADDR>:<PORT>` to access the chatbot.
+### Step 8. Run the chatbot
 
-   If you are using a remote machine to run this application, you can do port forwarding to your local browser:
-   ```
-   sudo ufw allow PORT
-   ```
+**Quick deploy (recommended):**
+```bash
+cd community/oran-chatbot-multimodal
+chmod +x deploy.sh
+./deploy.sh
+# Custom port: ./deploy.sh --port 8080
+```
+`deploy.sh` creates the Python venv, installs all dependencies, validates `config.yaml`, and starts Streamlit automatically.
 
-   To ssh with port forwarding:
-   ```
-   ssh -L PORT:IP_ADDR:PORT localhost
-   ```
+**Manual run:**
+```bash
+.venv/bin/python -m streamlit run Multimodal_Assistant.py --server.port 8011
+```
+
+The server is accessible at `http://localhost:8011`. On a remote machine, forward the port:
+```bash
+ssh -L 8011:localhost:8011 user@remote-host
+```
 
 ### Step 9. Adding documents and creating vector database
 
